@@ -67,7 +67,7 @@ def print_results(results, item1, item2):
     no_paths_found = True
     if len(results['sg_1_to_2_direct']) > 0:
         no_paths_found = False
-        for protocol in results['sg_1_to_2_direct'].iterateitems():
+        for protocol in results['sg_1_to_2_direct']:
             print(item1 + ' can talk to ' + item2 + ' via ' + (protocol +' on ports: ' + get_port_range(list(results['sg_1_to_2_direct'][protocol])) if protocol != -1 else 'All Ports'))
 
     if len(results['elbs']) > 0:
@@ -257,20 +257,20 @@ def ports_a_can_talk_to_b(a, b):
                     else:
                         if sg_out['IpProtocol'] not in port_data:
                             port_data[sg_out['IpProtocol']] = set()
-                        range_sg_out = [sg_out['FromPort']] if sg_out['FromPort'] == sg_out['ToPort'] else range(sg_out['FromPort'], sg_out['ToPort'])
+                        range_sg_out = [sg_out['FromPort']] if sg_out['FromPort'] == sg_out['ToPort'] else range(sg_out['FromPort'], sg_out['ToPort']+1)
                         port_data[sg_out['IpProtocol']] |= set(range_sg_out)
 
                 elif all_egress:
                     if sg_in['IpProtocol'] not in port_data:
                         port_data[sg_in['IpProtocol']] = set()
-                    range_sg_in = [sg_in['FromPort']] if sg_in['FromPort'] == sg_in['ToPort'] else range(sg_in['FromPort'], sg_in['ToPort'])
+                    range_sg_in = [sg_in['FromPort']] if sg_in['FromPort'] == sg_in['ToPort'] else range(sg_in['FromPort'], sg_in['ToPort']+1)
                     port_data[sg_in['IpProtocol']] |= set(range_sg_in)
 
                 # If same protocol, or all protocols
                 elif sg_in['IpProtocol'] == sg_out['IpProtocol']:
                     # If the port permissions match
-                    range_sg_in = [sg_in['FromPort']] if sg_in['FromPort'] == sg_in['ToPort'] else range(sg_in['FromPort'], sg_in['ToPort'])
-                    range_sg_out = [sg_out['FromPort']] if sg_out['FromPort'] == sg_out['ToPort'] else range(sg_out['FromPort'], sg_out['ToPort'])
+                    range_sg_in = [sg_in['FromPort']] if sg_in['FromPort'] == sg_in['ToPort'] else range(sg_in['FromPort'], sg_in['ToPort']+1)
+                    range_sg_out = [sg_out['FromPort']] if sg_out['FromPort'] == sg_out['ToPort'] else range(sg_out['FromPort'], sg_out['ToPort']+1)
                     intersection = set(set(range_sg_in) & set(range_sg_out))
                     if len(intersection) > 0:
                         if sg_out['IpProtocol'] not in port_data:
@@ -290,6 +290,9 @@ def main():
         instance2_sg = describe_sg([arguments.Security_Groups[0][1]])
 
     results = compare_sg_rules(instance1_sg, instance2_sg)
+    if isinstance(results, basestring):
+        print results
+        return
 
     if is_instances:
         print_results(results, arguments.Instances[0][0], arguments.Instances[0][1])
@@ -301,8 +304,6 @@ if __name__ == "__main__":
     # Arguments
     parser = argparse.ArgumentParser(description='Checks if two machines in AWS have '
                                                  'permission to talk with each other on specified port.')
-    parser.add_argument('-p', '--port', action='store', dest='Port', required=False, default=80,
-                        help='Port to check for connectivity permission.')
     parser.add_argument('-r', '--region', action='store', dest='Region', required=True,
                         help='Region to evaluate resources in.')
     instance_or_sg = parser.add_mutually_exclusive_group(required=True)
