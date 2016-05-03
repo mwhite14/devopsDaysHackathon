@@ -70,12 +70,10 @@ def compare_sg_rules(sg_1, sg_2):
     ports_2_to_1 = ports_a_can_talk_to_b(sg_2, sg_1)
     return
 
-# todo: account for port ranges
+
 # returns dict of what can talk to what, or -1 if all ports are open between the 2
 def ports_a_can_talk_to_b(a, b):
-    port_data = {} # { protocol: {toPort: []} }
-
-    all_ingress = False
+    port_data = {}  # { protocol: set of ports }
 
     # For each egress permission
     for sg_out in a['ip_permissions_egress']:
@@ -87,46 +85,55 @@ def ports_a_can_talk_to_b(a, b):
             if ip['CidrIp'] == '0.0.0.0/0':
                 outbound_allowed = True
                 all_egress = True
+                break
         for group in sg_out['UserIdGroupPairs']:
             if group['GroupId'] in b['group_ids']:
                 outbound_allowed = True
+                break
 
         # if a can access b, see if and where it has access
         if outbound_allowed:
 
             # For each ingress permission
             for sg_in in b['ip_permissions']:
+                inbound_allowed = False
+                for group in sg_in['UserIdGroupPairs']:
+                    if group['GroupId'] in a['group_ids']:
+                        inbound_allowed = True
+                        break
+                for ip in sg_in['IpRanges']:
+                    if ip['CidrIp'] == '0.0.0.0/0':
+                        inbound_allowed = True
+                        break
+                if not inbound_allowed:
+                    continue
+
                 # If allows all ingress
-                if all_ingress or sg_out['IpProtocol'] == -1:
+                if sg_out['IpProtocol'] == -1:
                     if all_egress:
                         return -1
                     else:
                         if sg_out['IpProtocol'] not in port_data:
-                            port_data[sg_out['IpProtocol']] = {}
-                        if sg_out['ToPort'] not in port_data[sg_out['IpProtocol']]:
-                            port_data[sg_out['IpProtocol']][sg_out] = []
-                        port_data[sg_out['IpProtocol']][sg_out['ToPort']].append(sg_out['FromPort'])
+                            port_data[sg_out['IpProtocol']] = set()
+                        range_sg_out = [sg_out['FromPort']] if sg_out['FromPort'] == sg_out['ToPort'] else range(sg_out['FromPort'], sg_out['ToPort'])
+                        port_data[sg_out['IpProtocol']] |= set(range_sg_out)
+
                 elif all_egress:
-                    for group in sg_in['UserIdGroupPairs']:
-                        if group in a['group_ids']:
-                            if sg_in['IpProtocol'] not in port_data:
-                                port_data[sg_in['IpProtocol']] = {}
-                            if sg_in['ToPort'] not in port_data[sg_in['IpProtocol']]:
-                                port_data[sg_in['IpProtocol']][sg_in] = []
-                            port_data[sg_in['IpProtocol']][sg_in['ToPort']].append(-1)
-                            break
+                    if sg_in['IpProtocol'] not in port_data:
+                        port_data[sg_in['IpProtocol']] = set()
+                    range_sg_in = [sg_in['FromPort']] if sg_in['FromPort'] == sg_in['ToPort'] else range(sg_in['FromPort'], sg_in['ToPort'])
+                    port_data[sg_in['IpProtocol']] |= set(range_sg_in)
+
                 # If same protocol, or all protocols
                 elif sg_in['IpProtocol'] == sg_out['IpProtocol']:
                     # If the port permissions match
-                    if sg_out['FromPort'] <= sg_in['FromPort'] and sg_in['ToPort'] <= sg_out['ToPort']:
-                        for group in sg_in['UserIdGroupPairs']:
-                            if group in a['group_ids']:
-                                if sg_out['IpProtocol'] not in port_data:
-                                    port_data[sg_out['IpProtocol']] = {}
-                                if sg_out['ToPort'] not in port_data[sg_out['IpProtocol']]:
-                                    port_data[sg_out['IpProtocol']][sg_out['ToPort']] = []
-                                port_data[sg_out['IpProtocol']][sg_out['ToPort']].append(sg_out['FromPort'])
-                                break
+                    range_sg_in = [sg_in['FromPort']] if sg_in['FromPort'] == sg_in['ToPort'] else range(sg_in['FromPort'], sg_in['ToPort'])
+                    range_sg_out = [sg_out['FromPort']] if sg_out['FromPort'] == sg_out['ToPort'] else range(sg_out['FromPort'], sg_out['ToPort'])
+                    intersection = set(set(range_sg_in) & set(range_sg_out))
+                    if len(intersection) > 0:
+                        if sg_out['IpProtocol'] not in port_data:
+                            port_data[sg_out['IpProtocol']] = set()
+                        port_data[sg_out['IpProtocol']] |= intersection
 
     return port_data
 
