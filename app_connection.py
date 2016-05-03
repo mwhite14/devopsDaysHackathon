@@ -33,6 +33,29 @@ def get_mutual_elbs(elbs_1, elbs_2):
     return mutual_elbs
 
 
+def find_path(sg_1_to_elb, elb_to_sg_1, sg_2_to_elb, elb_to_sg_2, instance_behind_elb):
+    sg_mapping = {'sg_1': {}, 'sg_2': {}}
+    # find sg_1 to _sg_2
+    if instance_behind_elb != 1:
+        for protocol in sg_1_to_elb:
+            if protocol in elb_to_sg_2:
+                intersect = sg_1_to_elb[protocol] & elb_to_sg_2[protocol]
+                if len(intersect) > 0:
+                    if protocol not in sg_mapping['sg_1']:
+                        sg_mapping['sg_1'][protocol] = set()
+                    sg_mapping['sg_1'][protocol] |= intersect
+
+    if instance_behind_elb != 2:
+        for protocol in sg_2_to_elb:
+            if protocol in elb_to_sg_1:
+                intersect = sg_2_to_elb[protocol] & elb_to_sg_1[protocol]
+                if len(intersect) > 0:
+                    if protocol not in sg_mapping['sg_2']:
+                        sg_mapping['sg_2'][protocol] = set()
+                    sg_mapping['sg_2'][protocol] |= intersect
+    return sg_mapping
+
+
 ################################
 # Functions to gather data
 ################################
@@ -97,6 +120,18 @@ def find_elbs_surrounding_sg(sg):
     return elb_data
 
 
+# returns if instance 1 or 2
+def find_which_instance_is_behind_elb(elb_name, instance1, instance2):
+    response = elb_client.describe_load_balancers(LoadBalancerNames=[elb_name])
+
+    for instance in response['LoadBalancerDescriptions'][0]['Instances']:
+        if instance['InstanceId'] == instance1:
+            return 1
+        if instance['InstanceId'] == instance2:
+            return 2
+    return 0
+
+
 ################################
 # Comparison FUnctions
 ################################
@@ -119,10 +154,20 @@ def compare_sg_rules(sg_1, sg_2):
 
     elbs = get_mutual_elbs(elbs_1, elbs_2)
 
-    # Todo: look at the mutual elbs and map them
+    elb_paths = {}
+    for elb_name, value in elbs.iteritems():
+        # find if sg_1 is behind current elb (this is important,because an instance doesnt talk out of an elb
+        instance_behind_elb = 0
+        if is_instances:
+            # find which instance is behind lb
+            instance_behind_elb = find_which_instance_is_behind_elb(elb_name, arguments.Instances[0][0], arguments.Instances[0][1])
 
-    # see what ports/protocols the elbs can talk to the instances
-    #for elb in elbs_1:
+        sg_1_to_elb = ports_a_can_talk_to_b(sg_1, value)
+        elb_to_sg_1= ports_a_can_talk_to_b(value, sg_1)
+        sg_2_to_elb = ports_a_can_talk_to_b(sg_2, value)
+        elb_to_sg_2 = ports_a_can_talk_to_b(value, sg_2)
+
+        elb_paths[elb_name] = find_path(sg_1_to_elb, elb_to_sg_1, sg_2_to_elb, elb_to_sg_2, instance_behind_elb)
 
     return
 
@@ -194,12 +239,14 @@ def ports_a_can_talk_to_b(a, b):
 
 
 def main():
+
     if arguments.Security_Groups is None:
         instance1_sg = describe_sg(get_instance_sgs(arguments.Instances[0][0]))
         instance2_sg = describe_sg(get_instance_sgs(arguments.Instances[0][1]))
     else:
         instance1_sg = describe_sg([arguments.Security_Groups[0][0]])
         instance2_sg = describe_sg([arguments.Security_Groups[0][1]])
+
 
     results = compare_sg_rules(instance1_sg, instance2_sg)
 
@@ -224,6 +271,10 @@ if __name__ == "__main__":
     ec2_client = boto3.client('ec2', arguments.Region)
     ec2 = boto3.resource('ec2', arguments.Region)
     elb_client = boto3.client('elb', arguments.Region)
+
+    is_instances = False
+    if arguments.Security_Groups is None:
+        is_instances = True
 
     main()
     sys.exit(0)
