@@ -1,24 +1,7 @@
 #!/usr/bin/env python
 import argparse
 import boto3
-import json
-import logging
-import os
 import sys
-import traceback
-
-
-class InstanceRelationship(object):
-    isInstances = False
-    obj_1 = None
-    obj_2 = None
-
-    obj_1_to_2_ports = []
-    obj_2_to_1_ports = []
-
-    obj_1_elbs = []
-    obj_2_elbs = []
-    error = None
 
 
 ################################
@@ -54,6 +37,64 @@ def find_path(sg_1_to_elb, elb_to_sg_1, sg_2_to_elb, elb_to_sg_2, instance_behin
                         sg_mapping['sg_2'][protocol] = set()
                     sg_mapping['sg_2'][protocol] |= intersect
     return sg_mapping
+
+
+def get_port_range(port_set):
+    p = []
+    last = -2
+    start = -1
+
+    for item in port_set:
+        if item != last + 1:
+            if start != -1:
+                p.append([start, last])
+            start = item
+        last = item
+
+    p.append([start, last])
+    s = ""
+    for range in p:
+        if range[0] == range[1]:
+            s += str(range[0]) + ", "
+        else:
+            s += str(range[0])+'-'+str(range[1])+', '
+
+    s = s[:-2]
+    return s
+
+
+def print_results(results, item1, item2):
+    no_paths_found = True
+    if len(results['sg_1_to_2_direct']) > 0:
+        no_paths_found = False
+        for protocol in results['sg_1_to_2_direct'].iterateitems():
+            print(item1 + ' can talk to ' + item2 + ' via ' + (protocol +' on ports: ' + get_port_range(list(results['sg_1_to_2_direct'][protocol])) if protocol != -1 else 'All Ports'))
+
+    if len(results['elbs']) > 0:
+        no_paths_found = False
+        for elb in results['elbs']:
+            if len(results['elbs'][elb]['sg_1']) > 0:
+                for protocol in results['elbs'][elb]['sg_1']:
+                    print(item1 + ' can talk to ' + item2 + ' through ELB "' + elb + '" via ' +(
+                    protocol + ' on ports: ' + get_port_range(list(results['elbs'][elb]['sg_1'][protocol])) if protocol != -1 else 'All Ports'))
+
+    print("")
+    if len(results['sg_2_to_1_direct']) > 0:
+        no_paths_found = False
+        for protocol in results['sg_2_to_1_direct']:
+            print(item2 + ' can talk to ' + item1 + ' via ' + (protocol + ' on ports: ' + get_port_range(list(results['sg_2_to_1_direct'][protocol])) if protocol != -1 else 'All Ports'))
+
+    if len(results['elbs']) > 0:
+        no_paths_found = False
+        for elb in results['elbs']:
+            if len(results['elbs'][elb]['sg_2']) > 0:
+                for protocol in results['elbs'][elb]['sg_2']:
+                    print(item2 + ' can talk to ' + item1 + ' through ELB "' + elb + '" via ' + (
+                        protocol + ' on ports: ' + get_port_range(
+                            list(results['elbs'][elb]['sg_2'][protocol])) if protocol != -1 else 'All Ports'))
+
+    if no_paths_found:
+        print(item1 + ' can not talk to ' + item2)
 
 
 ################################
@@ -151,7 +192,6 @@ def compare_sg_rules(sg_1, sg_2):
     # 3) Are they behind elbs?
     elbs_1 = find_elbs_surrounding_sg(sg_1)
     elbs_2 = find_elbs_surrounding_sg(sg_2)
-
     elbs = get_mutual_elbs(elbs_1, elbs_2)
 
     elb_paths = {}
@@ -163,13 +203,15 @@ def compare_sg_rules(sg_1, sg_2):
             instance_behind_elb = find_which_instance_is_behind_elb(elb_name, arguments.Instances[0][0], arguments.Instances[0][1])
 
         sg_1_to_elb = ports_a_can_talk_to_b(sg_1, value)
-        elb_to_sg_1= ports_a_can_talk_to_b(value, sg_1)
+        elb_to_sg_1 = ports_a_can_talk_to_b(value, sg_1)
         sg_2_to_elb = ports_a_can_talk_to_b(sg_2, value)
         elb_to_sg_2 = ports_a_can_talk_to_b(value, sg_2)
 
         elb_paths[elb_name] = find_path(sg_1_to_elb, elb_to_sg_1, sg_2_to_elb, elb_to_sg_2, instance_behind_elb)
 
-    return
+    return_data = { 'sg_1_to_2_direct': ports_1_to_2, 'sg_2_to_1_direct': ports_2_to_1, 'elbs': elb_paths}
+
+    return return_data
 
 
 # returns dict of what can talk to what, or -1 if all ports are open between the 2
@@ -247,10 +289,12 @@ def main():
         instance1_sg = describe_sg([arguments.Security_Groups[0][0]])
         instance2_sg = describe_sg([arguments.Security_Groups[0][1]])
 
-
     results = compare_sg_rules(instance1_sg, instance2_sg)
 
-    return
+    if is_instances:
+        print_results(results, arguments.Instances[0][0], arguments.Instances[0][1])
+    else:
+        print_results(results, arguments.Security_Groups[0][0], arguments.Security_Groups[0][1])
 
 
 if __name__ == "__main__":
@@ -275,7 +319,7 @@ if __name__ == "__main__":
     is_instances = False
     if arguments.Security_Groups is None:
         is_instances = True
-
+    print("")
     main()
     sys.exit(0)
 
