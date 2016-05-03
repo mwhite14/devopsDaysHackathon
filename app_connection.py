@@ -22,7 +22,19 @@ class InstanceRelationship(object):
 
 
 ################################
-# Function to gather data
+# Helper Functions
+################################
+def get_mutual_elbs(elbs_1, elbs_2):
+    mutual_elbs = {}
+    for key1, value1 in elbs_1.iteritems():
+        for key2 in elbs_2.iterkeys():
+            if key1 == key2:
+                mutual_elbs[key1] = value1
+    return mutual_elbs
+
+
+################################
+# Functions to gather data
 ################################
 # TODO: may want to consider IP addresses of EIP/ENI
 def get_instance_sgs(instance_id):
@@ -79,7 +91,7 @@ def find_elbs_surrounding_sg(sg):
             break
 
     elb_data = {}
-    for key,value in elb_sgs.iteritems():
+    for key, value in elb_sgs.iteritems():
         elb_data[key] = describe_sg(value)
 
     return elb_data
@@ -105,9 +117,12 @@ def compare_sg_rules(sg_1, sg_2):
     elbs_1 = find_elbs_surrounding_sg(sg_1)
     elbs_2 = find_elbs_surrounding_sg(sg_2)
 
+    elbs = get_mutual_elbs(elbs_1, elbs_2)
+
+    # Todo: look at the mutual elbs and map them
+
     # see what ports/protocols the elbs can talk to the instances
     #for elb in elbs_1:
-
 
     return
 
