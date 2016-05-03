@@ -303,7 +303,7 @@ def main():
 if __name__ == "__main__":
     # Arguments
     parser = argparse.ArgumentParser(description='Checks if two machines in AWS have '
-                                                 'permission to talk with each other on specified port.')
+                                                 'permission to talk with each other and if so how.')
     parser.add_argument('-r', '--region', action='store', dest='Region', required=True,
                         help='Region to evaluate resources in.')
     instance_or_sg = parser.add_mutually_exclusive_group(required=True)
