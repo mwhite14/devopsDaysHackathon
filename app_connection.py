@@ -54,20 +54,61 @@ def describe_sg(security_group_ids):
     return sgs_data
 
 
+def find_elbs_surrounding_sg(sg):
+    associated_sgs = set()
+    for ingress in sg['ip_permissions']:
+        for group in ingress['UserIdGroupPairs']:
+            associated_sgs.add(group['GroupId'])
+
+    for egress in sg['ip_permissions_egress']:
+        for group in egress['UserIdGroupPairs']:
+            associated_sgs.add(group['GroupId'])
+
+    elb_sgs = {}
+    response = elb_client.describe_load_balancers()
+    while True:
+        for elb in response['LoadBalancerDescriptions']:
+            for elb_sg in elb['SecurityGroups']:
+                if elb_sg in associated_sgs:
+                    if elb['LoadBalancerName'] not in elb_sgs:
+                        elb_sgs[elb['LoadBalancerName']] = []
+                    elb_sgs[elb['LoadBalancerName']].append(elb_sg)
+        try:
+            response = elb_client.describe_load_balancers(Marker=response['NextMarker'])
+        except:
+            break
+
+    elb_data = {}
+    for key,value in elb_sgs.iteritems():
+        elb_data[key] = describe_sg(value)
+
+    return elb_data
+
+
 ################################
 # Comparison FUnctions
 ################################
-# TODO: account ofr different user IDs with SGs
+# TODO: account for different user IDs with SGs
 # -1 is wild card for ports in AWS
 def compare_sg_rules(sg_1, sg_2):
     # run through check list
 
     # 1) are they in same vpc?  Future plan would check cross vpc talk
-#    if sg_1['vpc_id'] != sg_2['vpc_id']:
-     #   return 'Items being compared in different VPCs'
+    if sg_1['vpc_id'] != sg_2['vpc_id']:
+        return 'Items being compared in different VPCs'
 
+    # 2) can they talk directly to each other?
     ports_1_to_2 = ports_a_can_talk_to_b(sg_1, sg_2)
     ports_2_to_1 = ports_a_can_talk_to_b(sg_2, sg_1)
+
+    # 3) Are they behind elbs?
+    elbs_1 = find_elbs_surrounding_sg(sg_1)
+    elbs_2 = find_elbs_surrounding_sg(sg_2)
+
+    # see what ports/protocols the elbs can talk to the instances
+    #for elb in elbs_1:
+
+
     return
 
 
@@ -77,7 +118,6 @@ def ports_a_can_talk_to_b(a, b):
 
     # For each egress permission
     for sg_out in a['ip_permissions_egress']:
-        all_protocols = True if sg_out['IpProtocol'] == -1 else False
         outbound_allowed = False
         all_egress = False
         # Check if there are even outbound permission to talk to other machine
@@ -148,7 +188,6 @@ def main():
 
     results = compare_sg_rules(instance1_sg, instance2_sg)
 
-
     return
 
 
@@ -169,7 +208,7 @@ if __name__ == "__main__":
 
     ec2_client = boto3.client('ec2', arguments.Region)
     ec2 = boto3.resource('ec2', arguments.Region)
-    client = boto3.client('elb', arguments.Region)
+    elb_client = boto3.client('elb', arguments.Region)
 
     main()
     sys.exit(0)
